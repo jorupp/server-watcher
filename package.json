@@ -1,0 +1,16 @@
+{
+  "name": "server-watcher",
+  "version": "1.0.0",
+  "description": "Steam game server monitor with desktop notifications",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "gamedig": "^4.3.0",
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "electron": "^29.0.0"
+  }
+}
