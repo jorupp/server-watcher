@@ -7,24 +7,42 @@ const fs = require('fs');
 const yaml = require('js-yaml');
 const GameDig = require('gamedig');
 
-// Required on Windows for toast notifications to work
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.serverwatcher');
 }
 
+// Hot-reload in dev: renderer files trigger a soft reload, main/preload trigger
+// a full restart.  electron-reload is a devDependency so this is a no-op in prod.
+if (process.env.NODE_ENV === 'development') {
+  require('electron-reload')(__dirname, {
+    electron: process.execPath,
+    hardResetMethod: 'exit',
+    ignored: /node_modules|\.git|servers\.yaml/,
+  });
+}
+
 const CONFIG_PATH = path.join(__dirname, 'servers.yaml');
 const DEFAULT_POLL_INTERVAL = 30;
+const RETRY_DELAY_MS = 5_000;
 
 let mainWindow = null;
 let tray = null;
-let pollTimer = null;
 
 let config = { poll_interval: DEFAULT_POLL_INTERVAL, servers: [] };
-const serverStates = new Map(); // serverKey -> state object
-const knownPlayers = new Map(); // serverKey -> Set<playerName>
-const initialized = new Set();  // keys that have completed at least one successful poll
+const serverStates = new Map(); // key -> state object
+const knownPlayers = new Map(); // key -> Set<playerName>
+const initialized  = new Set(); // keys with at least one successful baseline poll
+const serverTimers = new Map(); // key -> timeoutId
 
-// ─── Config ──────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+function serverKey(cfg) {
+  return `${cfg.host}:${cfg.port || 27015}`;
+}
+
+// ─── Config ───────────────────────────────────────────────────────────────────
 
 function loadConfig() {
   try {
@@ -40,14 +58,6 @@ function loadConfig() {
   }
 }
 
-// ─── Server polling ───────────────────────────────────────────────────────────
-
-function serverKey(cfg) {
-  return `${cfg.host}:${cfg.port || 27015}`;
-}
-
-// Populate serverStates with pending placeholders so the UI shows all
-// configured servers immediately, before the first poll completes.
 function initPendingStates() {
   serverStates.clear();
   for (const cfg of config.servers) {
@@ -60,13 +70,17 @@ function initPendingStates() {
       password: cfg.password || '',
       pending:  true,
       online:   false,
+      retrying: false,
+      retryAt:  null,
       lastUpdated: null,
     });
   }
 }
 
-async function queryServer(cfg) {
-  // 'steam' is not a valid gamedig type; 'protocol-valve' is the generic Source handler
+// ─── Querying ─────────────────────────────────────────────────────────────────
+
+// Single attempt only — caller decides whether to retry.
+async function querySingle(cfg) {
   let type = cfg.type || 'protocol-valve';
   if (type === 'steam') type = 'protocol-valve';
 
@@ -74,93 +88,137 @@ async function queryServer(cfg) {
     type,
     host: cfg.host,
     port: Number(cfg.port) || 27015,
-    maxAttempts: 2,
+    maxAttempts: 1,
     socketTimeout: 5000,
     givenPortOnly: true,
   };
   if (cfg.appid) options.appid = Number(cfg.appid);
 
-  const state = await GameDig.query(options);
-  return {
-    online: true,
-    name: state.name || cfg.label,
-    map: state.map || '',
-    players: state.players.map(p => p.name).filter(n => n?.trim()),
-    maxPlayers: state.maxplayers || 0,
-    ping: Math.round(state.ping || 0),
-  };
+  try {
+    const s = await GameDig.query(options);
+    return {
+      online:     true,
+      name:       s.name || cfg.label,
+      map:        s.map  || '',
+      players:    s.players.map(p => p.name).filter(n => n?.trim()),
+      maxPlayers: s.maxplayers || 0,
+      ping:       Math.round(s.ping || 0),
+    };
+  } catch (err) {
+    return {
+      online: false,
+      error:  err.message || 'Query failed',
+      errorDetail: [
+        `Host:  ${cfg.host}:${Number(cfg.port) || 27015}`,
+        `Type:  ${type}`,
+        `Error: ${err.message || 'Query failed'}`,
+      ].join('\n'),
+    };
+  }
 }
 
-async function pollAll() {
-  if (!config.servers.length) return;
+// Merge a query result into the stored state for a server.
+function applyResult(key, cfg, result, extra = {}) {
+  const prev = serverStates.get(key) ?? {};
+  serverStates.set(key, {
+    ...prev,
+    key,
+    label:    cfg.label || key,
+    host:     cfg.host,
+    port:     Number(cfg.port) || 27015,
+    password: cfg.password || '',
+    pending:  false,
+    retrying: false,
+    retryAt:  null,
+    ...result,
+    ...extra,
+    lastUpdated: Date.now(),
+  });
+}
 
-  const results = await Promise.allSettled(
-    config.servers.map(cfg => queryServer(cfg))
-  );
+// Merge only a partial update without touching lastUpdated.
+function patchState(key, patch) {
+  const s = serverStates.get(key);
+  if (s) serverStates.set(key, { ...s, ...patch });
+}
 
-  for (let i = 0; i < config.servers.length; i++) {
-    const cfg = config.servers[i];
-    const key = serverKey(cfg);
-    const r = results[i];
+// ─── Player join detection ────────────────────────────────────────────────────
 
-    const state = r.status === 'fulfilled'
-      ? r.value
-      : {
-          online: false,
-          error: r.reason?.message || 'Query failed',
-          errorDetail: [
-            `Host:  ${cfg.host}:${Number(cfg.port) || 27015}`,
-            `Type:  ${cfg.type || 'protocol-valve'}`,
-            `Error: ${r.reason?.message || 'Query failed'}`,
-          ].join('\n'),
-        };
+function checkJoins(key, cfg, result) {
+  if (!result.online) return;
+  const current  = new Set(result.players);
+  const previous = knownPlayers.get(key);
 
-    state.key      = key;
-    state.label    = cfg.label || key;
-    state.host     = cfg.host;
-    state.port     = Number(cfg.port) || 27015;
-    state.password = cfg.password || '';
-    state.pending  = false;
-    state.lastUpdated = Date.now();
-
-    serverStates.set(key, state);
-
-    if (state.online) {
-      const current = new Set(state.players);
-      const previous = knownPlayers.get(key);
-
-      // Only notify after the first successful poll establishes a baseline
-      if (previous !== undefined && initialized.has(key)) {
-        for (const name of current) {
-          if (!previous.has(name)) {
-            notify(
-              `${name} joined`,
-              `${state.label}  •  ${state.name || key}`
-            );
-          }
-        }
+  if (previous !== undefined && initialized.has(key)) {
+    for (const name of current) {
+      if (!previous.has(name)) {
+        const label = serverStates.get(key)?.label ?? key;
+        notify(`${name} joined`, `${label}  •  ${result.name || key}`);
       }
-
-      knownPlayers.set(key, current);
-      initialized.add(key);
     }
   }
 
-  pushStateUpdate();
-  updateTrayTooltip();
+  knownPlayers.set(key, current);
+  initialized.add(key);
+}
+
+// ─── Per-server poll cycle ────────────────────────────────────────────────────
+
+async function runServerPoll(cfg) {
+  const key = serverKey(cfg);
+
+  // ── Attempt 1 ──
+  const r1 = await querySingle(cfg);
+  applyResult(key, cfg, r1);
+  pushUpdate();
+
+  if (r1.online) {
+    checkJoins(key, cfg, r1);
+    return;
+  }
+
+  // ── Attempt 1 failed: show error + countdown ──
+  const retryAt = Date.now() + RETRY_DELAY_MS;
+  patchState(key, { retryAt });
+  pushUpdate();
+
+  await sleep(RETRY_DELAY_MS);
+
+  // ── Attempt 2 ──
+  patchState(key, { retrying: true, retryAt: null });
+  pushUpdate();
+
+  const r2 = await querySingle(cfg);
+  applyResult(key, cfg, r2);
+  pushUpdate();
+
+  if (r2.online) checkJoins(key, cfg, r2);
+}
+
+function scheduleServerPoll(cfg, delayMs = 0) {
+  const key = serverKey(cfg);
+  const prev = serverTimers.get(key);
+  if (prev != null) clearTimeout(prev);
+
+  const id = setTimeout(async () => {
+    await runServerPoll(cfg);
+    scheduleServerPoll(cfg, config.poll_interval * 1000);
+  }, delayMs);
+
+  serverTimers.set(key, id);
 }
 
 function startPolling() {
-  if (pollTimer) clearInterval(pollTimer);
-  pollAll();
-  pollTimer = setInterval(pollAll, config.poll_interval * 1000);
+  for (const id of serverTimers.values()) clearTimeout(id);
+  serverTimers.clear();
+  for (const cfg of config.servers) scheduleServerPoll(cfg, 0);
 }
 
 function resetAndRestart() {
   knownPlayers.clear();
   initialized.clear();
   initPendingStates();
-  pushStateUpdate();    // show pending placeholders immediately
+  pushUpdate();
   startPolling();
 }
 
@@ -173,12 +231,13 @@ function notify(title, body) {
 
 // ─── IPC ──────────────────────────────────────────────────────────────────────
 
-function pushStateUpdate() {
+function pushUpdate() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send('servers-update', {
-    servers: Array.from(serverStates.values()),
+    servers:      Array.from(serverStates.values()),
     pollInterval: config.poll_interval,
   });
+  updateTrayTooltip();
 }
 
 ipcMain.handle('reload-config', () => {
@@ -188,33 +247,25 @@ ipcMain.handle('reload-config', () => {
   return { ok: true };
 });
 
-ipcMain.handle('poll-now', async () => {
-  await pollAll();
+ipcMain.handle('poll-now', () => {
+  startPolling();   // cancel in-progress timers and restart all cycles immediately
   return { ok: true };
 });
 
-ipcMain.handle('join-server', (_, url) => {
-  shell.openExternal(url);
-});
+ipcMain.handle('join-server', (_, url) => shell.openExternal(url));
 
-// ─── Tray icon (BGRA bitmap, no asset file needed) ───────────────────────────
+// ─── Tray icon ────────────────────────────────────────────────────────────────
 
 function makeTrayIcon() {
   const size = 16;
   const buf = Buffer.alloc(size * size * 4);
-  const cx = (size - 1) / 2;
-  const cy = (size - 1) / 2;
-  const r = size / 2 - 1;
-
+  const cx = (size - 1) / 2, cy = (size - 1) / 2, r = size / 2 - 1;
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const d = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
       const a = d <= r ? 255 : d <= r + 1 ? Math.round(255 * (r + 1 - d)) : 0;
-      const idx = (y * size + x) * 4;
-      buf[idx]     = 0x71; // B  (#2ecc71 in BGRA)
-      buf[idx + 1] = 0xcc; // G
-      buf[idx + 2] = 0x2e; // R
-      buf[idx + 3] = a;    // A
+      const i = (y * size + x) * 4;
+      buf[i] = 0x71; buf[i+1] = 0xcc; buf[i+2] = 0x2e; buf[i+3] = a; // BGRA #2ecc71
     }
   }
   return nativeImage.createFromBitmap(buf, { width: size, height: size });
@@ -230,19 +281,14 @@ function updateTrayTooltip() {
 function createTray() {
   tray = new Tray(makeTrayIcon());
   tray.setToolTip('Server Watcher');
-
-  const menu = Menu.buildFromTemplate([
+  tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Show Window', click: showWindow },
     { type: 'separator' },
     {
       label: 'Reload Config',
       click: () => {
         const err = loadConfig();
-        if (err) {
-          notify('Config error', err);
-        } else {
-          resetAndRestart();
-        }
+        err ? notify('Config error', err) : resetAndRestart();
       },
     },
     { type: 'separator' },
@@ -250,13 +296,11 @@ function createTray() {
       label: 'Quit',
       click: () => {
         app.isQuitting = true;
-        if (pollTimer) clearInterval(pollTimer);
+        for (const id of serverTimers.values()) clearTimeout(id);
         app.quit();
       },
     },
-  ]);
-
-  tray.setContextMenu(menu);
+  ]));
   tray.on('click', showWindow);
 }
 
@@ -264,11 +308,8 @@ function createTray() {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1100,
-    height: 720,
-    minWidth: 640,
-    minHeight: 480,
-    backgroundColor: '#0f0f1a',
+    width: 1100, height: 720, minWidth: 640, minHeight: 480,
+    backgroundColor: '#f1f5f9',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -277,38 +318,23 @@ function createWindow() {
     title: 'Server Watcher',
     show: false,
   });
-
   mainWindow.loadFile('index.html');
   mainWindow.setMenu(null);
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
-    if (serverStates.size > 0) pushStateUpdate();
+    if (serverStates.size > 0) pushUpdate();
   });
-
-  // Hide to tray instead of closing
-  mainWindow.on('close', (e) => {
-    if (!app.isQuitting) {
-      e.preventDefault();
-      mainWindow.hide();
-    }
-  });
-
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
+  mainWindow.on('close', (e) => { if (!app.isQuitting) { e.preventDefault(); mainWindow.hide(); } });
+  mainWindow.on('closed', () => { mainWindow = null; });
 }
 
 function showWindow() {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    createWindow();
-  } else {
-    mainWindow.show();
-    mainWindow.focus();
-  }
+  if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+  else { mainWindow.show(); mainWindow.focus(); }
 }
 
-// ─── App lifecycle ─────────────────────────────────────────────────────────────
+// ─── App lifecycle ────────────────────────────────────────────────────────────
 
 app.whenReady().then(() => {
   const configErr = loadConfig();
@@ -318,16 +344,12 @@ app.whenReady().then(() => {
   createWindow();
 
   mainWindow.webContents.once('did-finish-load', () => {
-    if (configErr) {
-      mainWindow.webContents.send('config-error', configErr);
-    } else {
-      pushStateUpdate();   // render pending placeholders right away
-    }
+    if (configErr) mainWindow.webContents.send('config-error', configErr);
+    else pushUpdate();
   });
 
   if (!configErr) startPolling();
 });
 
-// Keep the app alive in the tray when all windows are closed
 app.on('window-all-closed', (e) => e.preventDefault());
 app.on('activate', showWindow);

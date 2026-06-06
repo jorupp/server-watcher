@@ -296,8 +296,18 @@
       border-radius: 4px;
     }
 
-    .no-players   { font-size: 12px; color: #94a3b8; font-style: italic; }
-    .pending-note { font-size: 12px; color: #94a3b8; font-style: italic; padding-left: 18px; }
+    .no-players { font-size: 12px; color: #94a3b8; font-style: italic; }
+
+    /* Pending / retry status lines */
+    .status-note {
+      font-size: 12px;
+      font-style: italic;
+      padding-left: 18px;
+      margin-top: 2px;
+    }
+    .status-note.muted     { color: #94a3b8; }
+    .status-note.countdown { color: #d97706; }
+    .status-note.retrying  { color: #64748b; }
 
     /* Expandable error block */
     .error-details { padding-left: 18px; }

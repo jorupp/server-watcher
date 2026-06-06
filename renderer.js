@@ -27,6 +27,11 @@ function steamUrl(s) {
   return s.password ? `${base}/${s.password}` : base;
 }
 
+function countdownText(retryAt) {
+  const secs = Math.max(0, Math.round((retryAt - Date.now()) / 1000));
+  return secs > 0 ? `Retrying in ${secs}s…` : 'Retrying…';
+}
+
 function renderCard(s) {
   const cls     = s.pending ? 'pending' : s.online ? 'online' : 'offline';
   const players = s.players ?? [];
@@ -34,46 +39,53 @@ function renderCard(s) {
   // ── Badge ──
   let badge;
   if (s.pending) {
-    badge = `<span class="player-badge">—</span>`;
+    badge = `<span class="player-badge">&mdash;</span>`;
   } else if (s.online) {
     badge = `<span class="player-badge">${players.length} / ${s.maxPlayers}</span>`;
   } else {
     badge = `<span class="player-badge">OFFLINE</span>`;
   }
 
-  // ── Join button (disabled when not online) ──
-  const joinUrl  = steamUrl(s);
-  const joinBtn  = `<button class="join-btn" data-url="${esc(joinUrl)}">Join Game</button>`;
+  // ── Join button ──
+  const joinBtn = `<button class="join-btn" data-url="${esc(steamUrl(s))}">Join Game</button>`;
 
-  // ── Sub-row: real server name + map + ping ──
+  // ── Sub-row ──
   let subRow = '';
   if (s.online) {
     const parts = [];
     if (s.name && s.name !== s.label) parts.push(`<span class="card-sub-name" title="${esc(s.name)}">${esc(s.name)}</span>`);
-    if (s.map)  parts.push(`<span class="tag" title="${esc(s.map)}">${esc(s.map)}</span>`);
+    if (s.map)       parts.push(`<span class="tag" title="${esc(s.map)}">${esc(s.map)}</span>`);
     if (s.ping != null) parts.push(`<span class="tag ${pingClass(s.ping)}">${s.ping}&thinsp;ms</span>`);
     if (parts.length) subRow = `<div class="card-sub">${parts.join('')}</div>`;
   }
 
-  // ── Player section ──
-  let playerSection;
+  // ── Player / status section ──
+  let body;
   if (s.pending) {
-    playerSection = `<p class="pending-note">Querying&hellip;</p>`;
+    body = `<p class="status-note muted">Querying&hellip;</p>`;
   } else if (s.online) {
     const chips = players.length === 0
       ? '<span class="no-players">No players online</span>'
       : players.map(p => `<span class="chip">${esc(p)}</span>`).join('');
-    playerSection = `
+    body = `
       <div class="players-section">
         <div class="players-heading">Players</div>
         <div class="player-chips">${chips}</div>
       </div>`;
   } else {
-    playerSection = `
+    // Error + optional retry state
+    let retryLine = '';
+    if (s.retrying) {
+      retryLine = `<p class="status-note retrying">Retrying&hellip;</p>`;
+    } else if (s.retryAt) {
+      retryLine = `<p class="status-note countdown" data-retry-at="${s.retryAt}">${esc(countdownText(s.retryAt))}</p>`;
+    }
+    body = `
       <details class="error-details">
         <summary class="error-summary">${esc(s.error || 'Server unreachable')}</summary>
         <pre class="error-detail-body">${esc(s.errorDetail || s.error || 'No additional details')}</pre>
-      </details>`;
+      </details>
+      ${retryLine}`;
   }
 
   const footer = s.lastUpdated
@@ -93,7 +105,7 @@ function renderCard(s) {
           </div>
         </div>
         ${subRow}
-        ${playerSection}
+        ${body}
         ${footer}
       </div>
     </div>`;
@@ -118,10 +130,8 @@ function render(data) {
     return;
   }
 
-  const online  = servers.filter(s => s.online).length;
-  const total   = servers.length;
-  summary.innerHTML =
-    `<span class="count-online">${online}</span> / ${total} online`;
+  const online = servers.filter(s => s.online).length;
+  summary.innerHTML = `<span class="count-online">${online}</span> / ${servers.length} online`;
 
   list.innerHTML = servers.map(renderCard).join('');
 }
@@ -135,18 +145,28 @@ function showConfigError(err) {
   document.getElementById('summary').innerHTML = '';
 }
 
-// Refresh "Updated Xs ago" footers in place without a full re-render
+// Tick every second: refresh "Updated Xs ago" footers and retry countdowns
+// without triggering a full re-render (which would collapse open <details>).
 setInterval(() => {
   if (!lastData) return;
+
   document.querySelectorAll('.server-card').forEach(card => {
     const state = lastData.servers.find(s => s.key === card.dataset.key);
     if (!state) return;
-    const footer = card.querySelector('.card-footer');
-    if (footer) footer.textContent = `Updated ${timeAgo(state.lastUpdated)}`;
-  });
-}, 15_000);
 
-// ── Event delegation for Join buttons ────────────────────────────────────────
+    const footer = card.querySelector('.card-footer');
+    if (footer && state.lastUpdated) {
+      footer.textContent = `Updated ${timeAgo(state.lastUpdated)}`;
+    }
+  });
+
+  document.querySelectorAll('.countdown').forEach(el => {
+    const retryAt = Number(el.dataset.retryAt);
+    el.textContent = countdownText(retryAt);
+  });
+}, 1000);
+
+// ── Event delegation ──────────────────────────────────────────────────────────
 document.getElementById('servers-list').addEventListener('click', (e) => {
   const btn = e.target.closest('.join-btn');
   if (btn?.dataset.url) window.api.joinServer(btn.dataset.url);
@@ -156,7 +176,7 @@ document.getElementById('servers-list').addEventListener('click', (e) => {
 window.api.onServersUpdate(render);
 window.api.onConfigError(showConfigError);
 
-// ── Refresh button (immediate re-poll) ───────────────────────────────────────
+// ── Refresh button ────────────────────────────────────────────────────────────
 document.getElementById('refresh-btn').addEventListener('click', async () => {
   const btn = document.getElementById('refresh-btn');
   btn.classList.add('spinning');
@@ -165,9 +185,12 @@ document.getElementById('refresh-btn').addEventListener('click', async () => {
 
   await window.api.pollNow();
 
-  btn.classList.remove('spinning');
-  btn.textContent = 'Refresh';
-  btn.disabled = false;
+  // Re-enable after a moment; actual updates arrive via IPC as polls complete
+  setTimeout(() => {
+    btn.classList.remove('spinning');
+    btn.textContent = 'Refresh';
+    btn.disabled = false;
+  }, 1500);
 });
 
 // ── Reload Config button ──────────────────────────────────────────────────────
