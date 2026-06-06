@@ -169,7 +169,7 @@ function checkJoins(key, cfg, result) {
     for (const name of current) {
       if (!previous.has(name)) {
         const label = serverStates.get(key)?.label ?? key;
-        notify(`${name} joined`, `${label}  •  ${result.name || key}`);
+        notify(`${name} joined`, `${label}  •  ${result.name || key}`, cfg.notification_sound);
       }
     }
   }
@@ -240,8 +240,13 @@ function resetAndRestart() {
 
 // ─── Notifications ────────────────────────────────────────────────────────────
 
-function playSound() {
-  const soundPath = config.notification_sound || DEFAULT_SOUND;
+// serverSound: per-server override → global config → Windows default
+function resolveSound(serverSound) {
+  return serverSound || config.notification_sound || DEFAULT_SOUND;
+}
+
+function playSound(serverSound) {
+  const soundPath = resolveSound(serverSound);
   if (!fs.existsSync(soundPath)) {
     console.warn('[sound] File not found:', soundPath);
     return;
@@ -251,7 +256,7 @@ function playSound() {
   exec(`powershell -NoProfile -c "(New-Object Media.SoundPlayer '${escaped}').PlaySync()"`);
 }
 
-function notify(title, body) {
+function notify(title, body, serverSound) {
   if (!Notification.isSupported()) {
     console.warn('[notify] Notifications not supported on this system');
     return;
@@ -259,7 +264,7 @@ function notify(title, body) {
   try {
     // Play sound ourselves so the path is configurable; silence the toast's
     // built-in sound to avoid a double-beep.
-    playSound();
+    playSound(serverSound);
     new Notification({ title, body, silent: true }).show();
   } catch (err) {
     console.error('[notify] Failed to show notification:', err);
@@ -292,10 +297,11 @@ ipcMain.handle('poll-now', () => {
 ipcMain.handle('join-server', (_, url) => shell.openExternal(url));
 
 ipcMain.handle('test-notify', (_, key) => {
-  const s = serverStates.get(key);
+  const s   = serverStates.get(key);
+  const cfg = config.servers.find(c => serverKey(c) === key);
   const label = s?.label ?? key;
   const name  = s?.name  ?? key;
-  notify('FakePlayer joined', `${label}  •  ${name}`);
+  notify('FakePlayer joined', `${label}  •  ${name}`, cfg?.notification_sound);
 });
 
 // ─── Tray icon ────────────────────────────────────────────────────────────────

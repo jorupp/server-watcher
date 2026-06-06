@@ -17,10 +17,11 @@ poll_interval: 30
 #   type  — gamedig game identifier (see list below)
 #
 # Optional fields:
-#   port      — query/status port (default: 27015 for most Steam games)
-#   joinPort  — game port to connect on, if different from the query port
-#   label     — friendly display name shown in the UI
-#   password  — stored here for your reference; not used for querying
+#   port               — query/status port (default: 27015 for most Steam games)
+#   joinPort           — game port to connect on, if different from the query port
+#   label              — friendly display name shown in the UI
+#   password           — stored here for your reference; not used for querying
+#   notification_sound — .wav file to play for this server (overrides global setting)
 #
 # If you don't know the gamedig `type` for your game, you can use:
 #   type: steam

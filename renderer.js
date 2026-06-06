@@ -51,8 +51,7 @@ function renderCard(s) {
     badge = `<span class="player-badge">OFFLINE</span>`;
   }
 
-  // ── Buttons ──
-  const testBtn = `<button class="test-btn" data-key="${esc(s.key)}" title="Fire a test notification as if FakePlayer joined">Test Notif</button>`;
+  // ── Join button ──
   const joinBtn = portsMatch(s)
     ? `<button class="join-btn" data-url="${esc(steamUrl(s))}">Join Game</button>`
     : `<span class="server-browser-note">Use Steam server browser</span>`;
@@ -110,7 +109,6 @@ function renderCard(s) {
           <div class="card-controls">
             ${badge}
             ${joinBtn}
-            ${testBtn}
           </div>
         </div>
         ${subRow}
@@ -180,8 +178,6 @@ document.getElementById('servers-list').addEventListener('click', (e) => {
   const joinBtn = e.target.closest('.join-btn');
   if (joinBtn?.dataset.url) window.api.joinServer(joinBtn.dataset.url);
 
-  const testBtn = e.target.closest('.test-btn');
-  if (testBtn?.dataset.key) window.api.testNotify(testBtn.dataset.key);
 });
 
 // ── IPC wiring ────────────────────────────────────────────────────────────────
@@ -203,6 +199,14 @@ document.getElementById('refresh-btn').addEventListener('click', async () => {
     btn.textContent = 'Refresh';
     btn.disabled = false;
   }, 1500);
+});
+
+// ── Test Notification button ──────────────────────────────────────────────────
+document.getElementById('test-notify-btn').addEventListener('click', () => {
+  if (!lastData?.servers?.length) return;
+  const servers = lastData.servers;
+  const pick = servers[Math.floor(Math.random() * servers.length)];
+  window.api.testNotify(pick.key);
 });
 
 // ── Reload Config button ──────────────────────────────────────────────────────
