@@ -1,0 +1,62 @@
+# rename to servers.yaml and fill in your server details to get started
+# ---------------------------------------------------------------------------
+# Server Watcher — Configuration
+# ---------------------------------------------------------------------------
+# poll_interval: seconds between queries for each server (minimum: 5)
+poll_interval: 30
+
+# servers: list of game servers to monitor
+#
+# Required fields:
+#   host  — IP address or hostname
+#   type  — gamedig game identifier (see list below)
+#
+# Optional fields:
+#   port      — query port (default: 27015 for most Steam games)
+#   label     — friendly display name shown in the UI
+#   password  — stored here for your reference; not used for querying
+#
+# If you don't know the gamedig `type` for your game, you can use:
+#   type: steam
+#   appid: <Steam App ID>
+# and gamedig will handle the rest.
+#
+# Common type values:
+#   CS2 / CS:GO     → csgo
+#   Team Fortress 2 → tf2
+#   Garry's Mod     → garrysmod
+#   ARK             → arkse
+#   Rust            → rust
+#   Valheim         → valheim
+#   Left 4 Dead 2   → left4dead2
+#   7 Days to Die   → 7daystodie
+#   Killing Floor 2 → killingfloor2
+#   Squad           → squad
+#   ARMA 3          → arma3
+#   Minecraft       → minecraft
+#
+#   Full list: https://github.com/gamedig/node-gamedig#games-list
+# ---------------------------------------------------------------------------
+
+servers:
+
+# Uncomment and fill in as needed:
+#
+#  - label: "Garry's Mod"
+#    host: "your.server.ip.or.hostname"
+#    port: 27015
+#    type: garrysmod
+#    password: "yourpassword"
+#
+#  - label: "Rust Server"
+#    host: "your.server.ip.or.hostname"
+#    port: 28015
+#    type: rust
+#    password: ""
+#
+#  - label: "Custom Steam Game"
+#    host: "your.server.ip.or.hostname"
+#    port: 27015
+#    type: steam
+#    appid: 12345
+#    password: ""
