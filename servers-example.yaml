@@ -5,6 +5,11 @@
 # poll_interval: seconds between queries for each server (minimum: 5)
 poll_interval: 30
 
+# notification_sound: path to a .wav file to play when a player joins.
+# Defaults to the Windows system notification sound if omitted.
+# Example:
+# notification_sound: "C:\Windows\Media\Windows Notify Email.wav"
+
 # servers: list of game servers to monitor
 #
 # Required fields:

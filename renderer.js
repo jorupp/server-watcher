@@ -23,10 +23,13 @@ function pingClass(ms) {
 }
 
 function steamUrl(s) {
-  const port = s.joinPort ?? s.port;
-  let args = `+connect%20${s.host}:${port}`;
-  if (s.password) args += `%20+password%20${encodeURIComponent(s.password)}`;
-  return `steam://run/${s.appid}//${args}`;
+  const base = `steam://connect/${s.host}:${s.port}`;
+  const withPassword = s.password ? `${base}/${s.password}` : base;
+  return s.appid ? `${withPassword}?appid=${s.appid}` : withPassword;
+}
+
+function portsMatch(s) {
+  return !s.joinPort || s.joinPort === s.port;
 }
 
 function countdownText(retryAt) {
@@ -48,9 +51,11 @@ function renderCard(s) {
     badge = `<span class="player-badge">OFFLINE</span>`;
   }
 
-  // ── Join button ──
-  const url = steamUrl(s);
-  const joinBtn = `<button class="join-btn" data-url="${esc(url)}">Join Game</button>`;
+  // ── Buttons ──
+  const testBtn = `<button class="test-btn" data-key="${esc(s.key)}" title="Fire a test notification as if FakePlayer joined">Test Notif</button>`;
+  const joinBtn = portsMatch(s)
+    ? `<button class="join-btn" data-url="${esc(steamUrl(s))}">Join Game</button>`
+    : `<span class="server-browser-note">Use Steam server browser</span>`;
 
   // ── Sub-row ──
   let subRow = '';
@@ -105,6 +110,7 @@ function renderCard(s) {
           <div class="card-controls">
             ${badge}
             ${joinBtn}
+            ${testBtn}
           </div>
         </div>
         ${subRow}
@@ -171,8 +177,11 @@ setInterval(() => {
 
 // ── Event delegation ──────────────────────────────────────────────────────────
 document.getElementById('servers-list').addEventListener('click', (e) => {
-  const btn = e.target.closest('.join-btn');
-  if (btn?.dataset.url) window.api.joinServer(btn.dataset.url);
+  const joinBtn = e.target.closest('.join-btn');
+  if (joinBtn?.dataset.url) window.api.joinServer(joinBtn.dataset.url);
+
+  const testBtn = e.target.closest('.test-btn');
+  if (testBtn?.dataset.key) window.api.testNotify(testBtn.dataset.key);
 });
 
 // ── IPC wiring ────────────────────────────────────────────────────────────────

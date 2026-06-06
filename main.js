@@ -4,11 +4,17 @@ const {
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { exec } = require('child_process');
 const yaml = require('js-yaml');
 const GameDig = require('gamedig');
 
 if (process.platform === 'win32') {
-  app.setAppUserModelId('com.serverwatcher');
+  // A custom AUMID only works once the app has a matching Start Menu shortcut
+  // (i.e. after packaging/installing). While running unpackaged in development,
+  // process.execPath (the electron.exe) is already registered with Windows and
+  // is the reliable choice. Use it unconditionally for now; swap to a proper
+  // AUMID if/when you build an installer.
+  app.setAppUserModelId(process.execPath);
 }
 
 // Hot-reload in dev: renderer files trigger a soft reload, main/preload trigger
@@ -28,7 +34,13 @@ const RETRY_DELAY_MS = 5_000;
 let mainWindow = null;
 let tray = null;
 
-let config = { poll_interval: DEFAULT_POLL_INTERVAL, servers: [] };
+// Default: the generic Windows system notification sound.
+const DEFAULT_SOUND = path.join(
+  process.env.SystemRoot || 'C:\\Windows',
+  'Media', 'Windows Notify System Generic.wav'
+);
+
+let config = { poll_interval: DEFAULT_POLL_INTERVAL, servers: [], notification_sound: null };
 const serverStates = new Map(); // key -> state object
 const knownPlayers = new Map(); // key -> Set<playerName>
 const initialized  = new Set(); // keys with at least one successful baseline poll
@@ -50,6 +62,7 @@ function loadConfig() {
     const parsed = yaml.load(raw);
     config = {
       poll_interval: Math.max(5, Number(parsed?.poll_interval) || DEFAULT_POLL_INTERVAL),
+      notification_sound: parsed?.notification_sound || null,
       servers: Array.isArray(parsed?.servers) ? parsed.servers : [],
     };
     return null;
@@ -227,9 +240,30 @@ function resetAndRestart() {
 
 // ─── Notifications ────────────────────────────────────────────────────────────
 
+function playSound() {
+  const soundPath = config.notification_sound || DEFAULT_SOUND;
+  if (!fs.existsSync(soundPath)) {
+    console.warn('[sound] File not found:', soundPath);
+    return;
+  }
+  // PowerShell's SoundPlayer is the lightest built-in option on Windows.
+  const escaped = soundPath.replace(/'/g, "''");
+  exec(`powershell -NoProfile -c "(New-Object Media.SoundPlayer '${escaped}').PlaySync()"`);
+}
+
 function notify(title, body) {
-  if (!Notification.isSupported()) return;
-  new Notification({ title, body }).show();
+  if (!Notification.isSupported()) {
+    console.warn('[notify] Notifications not supported on this system');
+    return;
+  }
+  try {
+    // Play sound ourselves so the path is configurable; silence the toast's
+    // built-in sound to avoid a double-beep.
+    playSound();
+    new Notification({ title, body, silent: true }).show();
+  } catch (err) {
+    console.error('[notify] Failed to show notification:', err);
+  }
 }
 
 // ─── IPC ──────────────────────────────────────────────────────────────────────
@@ -256,6 +290,13 @@ ipcMain.handle('poll-now', () => {
 });
 
 ipcMain.handle('join-server', (_, url) => shell.openExternal(url));
+
+ipcMain.handle('test-notify', (_, key) => {
+  const s = serverStates.get(key);
+  const label = s?.label ?? key;
+  const name  = s?.name  ?? key;
+  notify('FakePlayer joined', `${label}  •  ${name}`);
+});
 
 // ─── Tray icon ────────────────────────────────────────────────────────────────
 
