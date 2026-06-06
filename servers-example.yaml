@@ -12,7 +12,8 @@ poll_interval: 30
 #   type  — gamedig game identifier (see list below)
 #
 # Optional fields:
-#   port      — query port (default: 27015 for most Steam games)
+#   port      — query/status port (default: 27015 for most Steam games)
+#   joinPort  — game port to connect on, if different from the query port
 #   label     — friendly display name shown in the UI
 #   password  — stored here for your reference; not used for querying
 #
@@ -59,4 +60,11 @@ servers:
 #    port: 27015
 #    type: steam
 #    appid: 12345
+#    password: ""
+#
+#  - label: "ARK (query and game ports differ)"
+#    host: "your.server.ip.or.hostname"
+#    port: 27015       # A2S query port
+#    joinPort: 7778    # actual game port Steam connects to
+#    type: arkse
 #    password: ""

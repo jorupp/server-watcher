@@ -23,8 +23,10 @@ function pingClass(ms) {
 }
 
 function steamUrl(s) {
-  const base = `steam://connect/${s.host}:${s.port}`;
-  return s.password ? `${base}/${s.password}` : base;
+  const port = s.joinPort ?? s.port;
+  let args = `+connect%20${s.host}:${port}`;
+  if (s.password) args += `%20+password%20${encodeURIComponent(s.password)}`;
+  return `steam://run/${s.appid}//${args}`;
 }
 
 function countdownText(retryAt) {
@@ -47,7 +49,8 @@ function renderCard(s) {
   }
 
   // ── Join button ──
-  const joinBtn = `<button class="join-btn" data-url="${esc(steamUrl(s))}">Join Game</button>`;
+  const url = steamUrl(s);
+  const joinBtn = `<button class="join-btn" data-url="${esc(url)}">Join Game</button>`;
 
   // ── Sub-row ──
   let subRow = '';
