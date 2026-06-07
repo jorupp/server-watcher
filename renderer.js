@@ -37,7 +37,38 @@ function countdownText(retryAt) {
   return secs > 0 ? `Retrying in ${secs}s…` : 'Retrying…';
 }
 
-function renderCard(s) {
+function renderHistorySection(s, history) {
+  const serverHistory = history?.[s.key];
+  if (!serverHistory || Object.keys(serverHistory).length === 0) return '';
+
+  const currentPlayers = new Set(s.players ?? []);
+  const entries = Object.entries(serverHistory)
+    .map(([name, d]) => ({ name, ...d, isOnline: currentPlayers.has(name) }))
+    .sort((a, b) => {
+      if (a.isOnline !== b.isOnline) return a.isOnline ? -1 : 1;
+      return b.lastSeen - a.lastSeen;
+    });
+
+  const rows = entries.map(e => {
+    const timeStr = e.isOnline
+      ? `Online since ${timeAgo(e.sessionStart)}`
+      : `Last seen ${timeAgo(e.lastSeen)}`;
+    return `
+      <div class="history-row${e.isOnline ? ' history-online' : ''}">
+        <span class="history-name">${esc(e.name)}</span>
+        <span class="history-time">${esc(timeStr)}</span>
+      </div>`;
+  }).join('');
+
+  const label = `Last Seen (${entries.length} player${entries.length === 1 ? '' : 's'})`;
+  return `
+    <details class="history-details">
+      <summary class="history-summary">${label}</summary>
+      <div class="history-list">${rows}</div>
+    </details>`;
+}
+
+function renderCard(s, history) {
   const cls     = s.pending ? 'pending' : s.online ? 'online' : 'offline';
   const players = s.players ?? [];
 
@@ -113,6 +144,7 @@ function renderCard(s) {
         </div>
         ${subRow}
         ${body}
+        ${renderHistorySection(s, history)}
         ${footer}
       </div>
     </div>`;
@@ -120,7 +152,7 @@ function renderCard(s) {
 
 function render(data) {
   lastData = data;
-  const { servers, pollInterval } = data;
+  const { servers, pollInterval, history = {} } = data;
   const list    = document.getElementById('servers-list');
   const summary = document.getElementById('summary');
   const pollEl  = document.getElementById('poll-label');
@@ -140,7 +172,7 @@ function render(data) {
   const online = servers.filter(s => s.online).length;
   summary.innerHTML = `<span class="count-online">${online}</span> / ${servers.length} online`;
 
-  list.innerHTML = servers.map(renderCard).join('');
+  list.innerHTML = servers.map(s => renderCard(s, history)).join('');
 }
 
 function showConfigError(err) {

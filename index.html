@@ -359,6 +359,70 @@
       line-height: 1.6;
     }
 
+    /* ── Last Seen history section ───────────────────────────────────────── */
+    .history-details {
+      margin-top: 10px;
+      padding-left: 18px;
+    }
+
+    .history-details > summary {
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .history-details > summary::-webkit-details-marker { display: none; }
+    .history-details > summary::before {
+      content: '▶';
+      font-size: 8px;
+      color: #cbd5e1;
+      transition: transform 0.15s;
+      flex-shrink: 0;
+    }
+    .history-details[open] > summary::before { transform: rotate(90deg); }
+
+    .history-summary {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #94a3b8;
+    }
+
+    .history-list {
+      margin-top: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .history-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 8px;
+      padding: 1px 0;
+    }
+
+    .history-name {
+      font-size: 12px;
+      color: #94a3b8;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .history-time {
+      font-size: 11px;
+      color: #cbd5e1;
+      flex-shrink: 0;
+    }
+
+    .history-online .history-name { color: #334155; font-weight: 500; }
+    .history-online .history-time { color: #16a34a; }
+
     /* ── Card footer ─────────────────────────────────────────────────────── */
     .card-footer {
       font-size: 11px;
