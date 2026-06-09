@@ -65,15 +65,25 @@ function renderHistorySection(s, history) {
     });
 
   const rows = entries.map(e => {
-    const ts      = e.isOnline ? e.sessionStart : e.lastSeen;
-    const timeStr = e.isOnline
-      ? `Online since ${timeAgoLong(e.sessionStart)}`
-      : `Last seen ${timeAgoLong(e.lastSeen)}`;
-    const titleStr = ts ? new Date(ts).toLocaleString() : '';
+    const lastSeenTitle = e.lastSeen     ? new Date(e.lastSeen).toLocaleString()     : '';
+    const joinedTitle   = e.sessionStart ? new Date(e.sessionStart).toLocaleString() : '';
+
+    let timeCells;
+    if (e.isOnline) {
+      // Online: show "Online since X" (joined time). Last-seen is essentially right now.
+      timeCells = `<span class="history-time" title="${esc(joinedTitle)}">Online since ${timeAgoLong(e.sessionStart)}</span>`;
+    } else {
+      // Offline: show last-seen (primary) + joined/first-seen (secondary) when they differ.
+      timeCells = `<span class="history-time" title="${esc(lastSeenTitle)}">Last seen ${timeAgoLong(e.lastSeen)}</span>`;
+      if (e.sessionStart && e.sessionStart !== e.lastSeen) {
+        timeCells += `<span class="history-time history-joined" title="${esc(joinedTitle)}">Joined ${timeAgoLong(e.sessionStart)}</span>`;
+      }
+    }
+
     return `
       <div class="history-row${e.isOnline ? ' history-online' : ''}">
         <span class="history-name">${esc(e.name)}</span>
-        <span class="history-time" title="${esc(titleStr)}">${esc(timeStr)}</span>
+        <span class="history-times">${timeCells}</span>
       </div>`;
   }).join('');
 

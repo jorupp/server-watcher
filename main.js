@@ -171,10 +171,10 @@ function loadHistory() {
     for (const [key, serverData] of Object.entries(parsed.servers ?? {})) {
       const playerMap = new Map();
       for (const [name, d] of Object.entries(serverData?.players ?? {})) {
-        playerMap.set(name, {
-          lastSeen:     new Date(d.last_seen).getTime(),
-          sessionStart: new Date(d.session_start).getTime(),
-        });
+        const lastSeen     = d.last_seen     ? new Date(d.last_seen).getTime()     : 0;
+        // Backward compat: old history files may not have session_start; fall back to lastSeen.
+        const sessionStart = d.session_start ? new Date(d.session_start).getTime() : lastSeen;
+        playerMap.set(name, { lastSeen, sessionStart });
       }
       playerHistory.set(key, playerMap);
     }
