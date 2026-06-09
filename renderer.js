@@ -16,6 +16,21 @@ function timeAgo(ts) {
   return `${Math.round(s / 60)}m ago`;
 }
 
+// Extended format used in the Last Seen history section.
+function timeAgoLong(ts) {
+  if (!ts) return '—';
+  const ms    = Date.now() - ts;
+  const secs  = Math.floor(ms / 1000);
+  const mins  = Math.floor(ms / 60_000);
+  const hours = ms / 3_600_000;
+  const days  = ms / 86_400_000;
+  if (days  >= 2) return `${days.toFixed(1)}d ago`;
+  if (hours >= 2) return `${hours.toFixed(1)}h ago`;
+  if (mins  >= 1) return `${mins}m ago`;
+  if (secs  <  5) return 'just now';
+  return `${secs}s ago`;
+}
+
 function pingClass(ms) {
   if (ms < 50)  return 'ping-good';
   if (ms < 120) return 'ping-ok';
@@ -50,13 +65,15 @@ function renderHistorySection(s, history) {
     });
 
   const rows = entries.map(e => {
+    const ts      = e.isOnline ? e.sessionStart : e.lastSeen;
     const timeStr = e.isOnline
-      ? `Online since ${timeAgo(e.sessionStart)}`
-      : `Last seen ${timeAgo(e.lastSeen)}`;
+      ? `Online since ${timeAgoLong(e.sessionStart)}`
+      : `Last seen ${timeAgoLong(e.lastSeen)}`;
+    const titleStr = ts ? new Date(ts).toLocaleString() : '';
     return `
       <div class="history-row${e.isOnline ? ' history-online' : ''}">
         <span class="history-name">${esc(e.name)}</span>
-        <span class="history-time">${esc(timeStr)}</span>
+        <span class="history-time" title="${esc(titleStr)}">${esc(timeStr)}</span>
       </div>`;
   }).join('');
 
@@ -172,7 +189,24 @@ function render(data) {
   const online = servers.filter(s => s.online).length;
   summary.innerHTML = `<span class="count-online">${online}</span> / ${servers.length} online`;
 
+  // Capture which history <details> are currently open before re-rendering.
+  const openHistoryKeys = new Set();
+  list.querySelectorAll('.server-card').forEach(card => {
+    const details = card.querySelector('.history-details');
+    if (details?.open) openHistoryKeys.add(card.dataset.key);
+  });
+
   list.innerHTML = servers.map(s => renderCard(s, history)).join('');
+
+  // Restore open state for history sections.
+  if (openHistoryKeys.size) {
+    list.querySelectorAll('.server-card').forEach(card => {
+      if (openHistoryKeys.has(card.dataset.key)) {
+        const details = card.querySelector('.history-details');
+        if (details) details.open = true;
+      }
+    });
+  }
 }
 
 function showConfigError(err) {
