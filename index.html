@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Server Watcher</title>
+  <link rel="stylesheet" href="shared/cards.css">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -150,298 +151,18 @@
     @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.4} }
     .blink { animation: blink 1.6s ease-in-out infinite; }
 
-    /* ── Server card ─────────────────────────────────────────────────────── */
-    .server-card {
-      background: #ffffff;
-      border-radius: 10px;
-      border: 1px solid #e2e8f0;
-      overflow: hidden;
-      box-shadow: 0 1px 3px #0000000a;
-      transition: border-color 0.2s, box-shadow 0.2s;
-    }
-    .server-card.online  { border-color: #bbf7d0; box-shadow: 0 1px 4px #16a34a14; }
-    .server-card.offline { border-color: #fecaca; box-shadow: 0 1px 4px #dc262614; }
-    .server-card.pending { border-color: #e2e8f0; }
-
-    .status-bar { height: 3px; }
-    .online  .status-bar { background: #16a34a; }
-    .offline .status-bar { background: #dc2626; }
-    .pending .status-bar { background: #e2e8f0; }
-
-    .card-body { padding: 11px 15px 10px; }
-
-    /* ── Top row ─────────────────────────────────────────────────────────── */
-    .card-top {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 5px;
-    }
-
-    .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-    .online  .dot { background: #16a34a; box-shadow: 0 0 0 2px #bbf7d060; }
-    .offline .dot { background: #dc2626; box-shadow: 0 0 0 2px #fecaca60; }
-    .pending .dot { background: #cbd5e1; }
-
-    .server-label {
-      flex: 1;
-      font-size: 14px;
-      font-weight: 600;
-      color: #0f172a;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .card-controls {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-shrink: 0;
-    }
-
-    .player-badge {
+    #web-link {
       font-size: 12px;
-      font-weight: 700;
-      padding: 2px 9px;
-      border-radius: 20px;
-      white-space: nowrap;
-    }
-    .online .player-badge  { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
-    .offline .player-badge { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; font-size: 10px; letter-spacing: 0.5px; }
-    .pending .player-badge { background: #f8fafc; color: #94a3b8; border: 1px solid #e2e8f0; font-size: 10px; }
-
-    /* Join button */
-    .join-btn {
-      background: #f0fdf4;
-      border: 1px solid #bbf7d0;
-      color: #16a34a;
-      padding: 3px 11px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 12px;
-      font-family: inherit;
-      font-weight: 500;
-      white-space: nowrap;
-      transition: background 0.15s, border-color 0.15s, color 0.15s;
-    }
-    .join-btn:hover { background: #dcfce7; border-color: #86efac; color: #15803d; }
-
-    .server-browser-note {
-      font-size: 11px;
       color: #94a3b8;
-      font-style: italic;
+      text-decoration: none;
+      border-bottom: 1px dotted #cbd5e1;
     }
-
-    .offline .join-btn,
-    .pending .join-btn {
-      background: #f8fafc;
-      border-color: #e2e8f0;
-      color: #94a3b8;
+    #web-link:hover { color: #2563eb; border-bottom-color: #93c5fd; }
+    #web-link:empty { display: none; }
+    #web-link.web-error {
+      color: #dc2626;
+      border-bottom: none;
       cursor: default;
-      pointer-events: none;
-    }
-
-    /* ── Sub-row: real name, map, ping ───────────────────────────────────── */
-    .card-sub {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding-left: 18px;
-      margin-bottom: 9px;
-      flex-wrap: wrap;
-    }
-
-    .card-sub-name {
-      font-size: 11px;
-      color: #94a3b8;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      max-width: 320px;
-    }
-
-    .tag {
-      font-size: 11px;
-      background: #f1f5f9;
-      border: 1px solid #e2e8f0;
-      padding: 1px 7px;
-      border-radius: 4px;
-      color: #64748b;
-      white-space: nowrap;
-    }
-    .tag.ping-good { color: #16a34a; background: #f0fdf4; border-color: #bbf7d0; }
-    .tag.ping-ok   { color: #d97706; background: #fffbeb; border-color: #fde68a; }
-    .tag.ping-bad  { color: #dc2626; background: #fef2f2; border-color: #fecaca; }
-
-    /* ── Player list ─────────────────────────────────────────────────────── */
-    .players-section { padding-left: 18px; }
-
-    .players-heading {
-      font-size: 10px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.9px;
-      color: #94a3b8;
-      margin-bottom: 6px;
-    }
-
-    .player-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-
-    .chip {
-      font-size: 12px;
-      color: #334155;
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
-      padding: 2px 8px;
-      border-radius: 4px;
-    }
-
-    .no-players { font-size: 12px; color: #94a3b8; font-style: italic; }
-
-    /* Pending / retry status lines */
-    .status-note {
-      font-size: 12px;
-      font-style: italic;
-      padding-left: 18px;
-      margin-top: 2px;
-    }
-    .status-note.muted     { color: #94a3b8; }
-    .status-note.countdown { color: #d97706; }
-    .status-note.retrying  { color: #64748b; }
-
-    /* Expandable error block */
-    .error-details { padding-left: 18px; }
-
-    .error-details summary {
-      list-style: none;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      cursor: pointer;
-      user-select: none;
-      width: fit-content;
-    }
-    .error-details summary::-webkit-details-marker { display: none; }
-
-    .error-summary {
-      font-size: 12px;
-      color: #dc2626;
-      font-style: italic;
-    }
-
-    .error-details summary::before {
-      content: '▶';
-      font-size: 9px;
-      color: #dc2626;
-      opacity: 0.6;
-      transition: transform 0.15s;
-      flex-shrink: 0;
-    }
-    .error-details[open] summary::before { transform: rotate(90deg); }
-
-    .error-detail-body {
-      margin-top: 7px;
-      padding: 8px 10px;
-      background: #fef2f2;
-      border: 1px solid #fecaca;
-      border-radius: 6px;
-      font-size: 11px;
-      color: #7f1d1d;
-      font-family: 'Cascadia Mono', 'Consolas', monospace;
-      white-space: pre-wrap;
-      word-break: break-word;
-      line-height: 1.6;
-    }
-
-    /* ── Last Seen history section ───────────────────────────────────────── */
-    .history-details {
-      margin-top: 10px;
-      padding-left: 18px;
-    }
-
-    .history-details > summary {
-      list-style: none;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      cursor: pointer;
-      user-select: none;
-    }
-    .history-details > summary::-webkit-details-marker { display: none; }
-    .history-details > summary::before {
-      content: '▶';
-      font-size: 8px;
-      color: #cbd5e1;
-      transition: transform 0.15s;
-      flex-shrink: 0;
-    }
-    .history-details[open] > summary::before { transform: rotate(90deg); }
-
-    .history-summary {
-      font-size: 10px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      color: #94a3b8;
-    }
-
-    .history-list {
-      margin-top: 6px;
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-
-    .history-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-      gap: 8px;
-      padding: 1px 0;
-    }
-
-    .history-name {
-      font-size: 12px;
-      color: #94a3b8;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .history-times {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 1px;
-      flex-shrink: 0;
-    }
-
-    .history-time {
-      font-size: 11px;
-      color: #cbd5e1;
-      cursor: help;
-    }
-
-    .history-joined {
-      font-size: 10px;
-      color: #e2e8f0;
-    }
-
-    .history-online .history-name { color: #334155; font-weight: 500; }
-    .history-online .history-time { color: #16a34a; }
-
-    /* ── Card footer ─────────────────────────────────────────────────────── */
-    .card-footer {
-      font-size: 11px;
-      color: #cbd5e1;
-      margin-top: 9px;
-      text-align: right;
     }
   </style>
 </head>
@@ -451,6 +172,7 @@
     <div class="header-center">
       <span id="summary"></span>
       <span id="poll-label"></span>
+      <a id="web-link" href="#" title="Open the web dashboard in your browser"></a>
     </div>
     <div class="header-actions">
       <button class="btn btn-primary" id="refresh-btn">Refresh</button>
@@ -465,6 +187,7 @@
       </div>
     </div>
   </main>
+  <script src="shared/render.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

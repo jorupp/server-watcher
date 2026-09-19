@@ -7,6 +7,7 @@ const fs = require('fs');
 const { exec } = require('child_process');
 const yaml = require('js-yaml');
 const GameDig = require('gamedig');
+const webserver = require('./webserver');
 
 if (process.platform === 'win32') {
   // A custom AUMID only works once the app has a matching Start Menu shortcut
@@ -31,6 +32,9 @@ const CONFIG_PATH  = path.join(__dirname, 'servers.yaml');
 const HISTORY_PATH = path.join(__dirname, 'history.yaml');
 const DEFAULT_POLL_INTERVAL = 30;
 const RETRY_DELAY_MS = 5_000;
+const DEFAULT_WEB_PORT = 3030;
+// How often to re-nudge you when a `self` server has players and you're not on it.
+const DEFAULT_SELF_REMINDER_MINUTES = 10;
 
 let mainWindow = null;
 let tray = null;
@@ -41,13 +45,21 @@ const DEFAULT_SOUND = path.join(
   'Media', 'Windows Notify System Generic.wav'
 );
 
-let config = { poll_interval: DEFAULT_POLL_INTERVAL, servers: [], notification_sound: null };
+let config = {
+  poll_interval: DEFAULT_POLL_INTERVAL,
+  servers: [],
+  notification_sound: null,
+  web_port: DEFAULT_WEB_PORT,
+  self_reminder_minutes: DEFAULT_SELF_REMINDER_MINUTES,
+};
 const serverStates  = new Map(); // key -> state object
 const knownPlayers  = new Map(); // key -> Set<playerName>
 const initialized   = new Set(); // keys with at least one successful baseline poll
 const serverTimers  = new Map(); // key -> timeoutId
 // key -> Map<playerName, { lastSeen: number, sessionStart: number }>
 const playerHistory = new Map();
+// key -> timestamp of the next "players online without you" reminder
+const selfReminders = new Map();
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -55,6 +67,15 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 function serverKey(cfg) {
   return `${cfg.host}:${cfg.port || 27015}`;
+}
+
+// A server is polled and counted unless it was explicitly disabled.
+function isEnabled(cfg) {
+  return cfg?.enabled !== false;
+}
+
+function enabledStates() {
+  return Array.from(serverStates.values()).filter(isEnabled);
 }
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -66,6 +87,11 @@ function loadConfig() {
     config = {
       poll_interval: Math.max(5, Number(parsed?.poll_interval) || DEFAULT_POLL_INTERVAL),
       notification_sound: parsed?.notification_sound || null,
+      // web_port: false / 0 turns the dashboard off entirely.
+      web_port: parsed?.web_port === false ? null
+              : Number(parsed?.web_port) || DEFAULT_WEB_PORT,
+      self_reminder_minutes: parsed?.self_reminder_minutes === false ? null
+              : Math.max(1, Number(parsed?.self_reminder_minutes) || DEFAULT_SELF_REMINDER_MINUTES),
       servers: Array.isArray(parsed?.servers) ? parsed.servers : [],
     };
     return null;
@@ -86,7 +112,10 @@ function initPendingStates() {
       password: cfg.password || '',
       joinPort: cfg.joinPort ? Number(cfg.joinPort) : null,
       appid:    cfg.appid    ? Number(cfg.appid)    : null,
-      pending:  true,
+      self:     cfg.self || null,
+      enabled:  isEnabled(cfg),
+      // Disabled servers are never queried, so they're not "pending" either.
+      pending:  isEnabled(cfg),
       online:   false,
       retrying: false,
       retryAt:  null,
@@ -146,6 +175,8 @@ function applyResult(key, cfg, result, extra = {}) {
     port:     Number(cfg.port) || 27015,
     password: cfg.password || '',
     joinPort: cfg.joinPort ? Number(cfg.joinPort) : null,
+    self:     cfg.self || null,
+    enabled:  isEnabled(cfg),
     pending:  false,
     retrying: false,
     retryAt:  null,
@@ -217,12 +248,48 @@ function historyForIPC() {
 
 // ─── Player join detection ────────────────────────────────────────────────────
 
+// Periodic nudge for `self` servers: people are playing and you aren't there.
+// Armed when that becomes true, then repeats on the configured interval; cleared
+// as soon as you join or the server empties, so it fires promptly next time.
+function checkSelfReminder(key, cfg, current, now) {
+  const self = cfg.self;
+  const intervalMin = config.self_reminder_minutes;
+  if (!self || !intervalMin) return;
+
+  const othersPlaying = current.size > 0 && !current.has(self);
+  if (!othersPlaying) {
+    selfReminders.delete(key);
+    return;
+  }
+
+  const intervalMs = intervalMin * 60 * 1000;
+  const dueAt = selfReminders.get(key);
+  if (dueAt == null) {
+    selfReminders.set(key, now + intervalMs);
+    return;
+  }
+  if (now < dueAt) return;
+
+  selfReminders.set(key, now + intervalMs);
+  const label = serverStates.get(key)?.label ?? key;
+  const names = Array.from(current).join(', ');
+  notify(
+    `${current.size} player${current.size === 1 ? '' : 's'} on ${label}`,
+    names,
+    cfg.notification_sound
+  );
+}
+
 function checkJoins(key, cfg, result) {
   if (!result.online) return;
   const current  = new Set(result.players);
   const previous = knownPlayers.get(key);
   const now      = Date.now();
   const isFirst  = !initialized.has(key);
+  const self     = cfg.self || null;
+  // While you're on the server yourself you can already see who comes and goes,
+  // so other players' join notifications are muted.
+  const selfPresent = self ? current.has(self) : false;
 
   let serverHistory = playerHistory.get(key);
   if (!serverHistory) {
@@ -249,11 +316,19 @@ function checkJoins(key, cfg, result) {
     serverHistory.set(name, { lastSeen: now, sessionStart });
 
     // Fire join notification after the baseline is established.
-    if (!isFirst && isNewJoin) {
+    if (!isFirst && isNewJoin && (!selfPresent || name === self)) {
       const label = serverStates.get(key)?.label ?? key;
       notify(`${name} joined`, `${label}  •  ${result.name || key}`, cfg.notification_sound);
     }
   }
+
+  // Leaving is only announced for `self` — that's the one you asked about.
+  if (self && !isFirst && previous?.has(self) && !current.has(self)) {
+    const label = serverStates.get(key)?.label ?? key;
+    notify(`${self} left`, `${label}  •  ${result.name || key}`, cfg.notification_sound);
+  }
+
+  checkSelfReminder(key, cfg, current, now);
 
   knownPlayers.set(key, current);
   initialized.add(key);
@@ -309,13 +384,17 @@ function scheduleServerPoll(cfg, delayMs = 0) {
 function startPolling() {
   for (const id of serverTimers.values()) clearTimeout(id);
   serverTimers.clear();
-  for (const cfg of config.servers) scheduleServerPoll(cfg, 0);
+  for (const cfg of config.servers) {
+    if (isEnabled(cfg)) scheduleServerPoll(cfg, 0);
+  }
 }
 
 function resetAndRestart() {
   knownPlayers.clear();
   initialized.clear();
+  selfReminders.clear();
   initPendingStates();
+  startWebserver();
   pushUpdate();
   startPolling();
 }
@@ -355,14 +434,34 @@ function notify(title, body, serverSound) {
 
 // ─── IPC ──────────────────────────────────────────────────────────────────────
 
-function pushUpdate() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send('servers-update', {
+function statePayload() {
+  return {
     servers:      Array.from(serverStates.values()),
     pollInterval: config.poll_interval,
     history:      historyForIPC(),
-  });
-  updateTrayTooltip();
+    webPort:      webserver.getPort(),
+    webError:     webserver.getError(),
+  };
+}
+
+// Same shape, minus the Steam passwords — the web UI has no Join button and the
+// dashboard is reachable by anything on the LAN.
+function webPayload() {
+  const p = statePayload();
+  p.servers = p.servers.map(({ password, ...rest }) => rest);
+  p.generatedAt = Date.now();
+  return p;
+}
+
+function startWebserver() {
+  // pushUpdate on ready so the header can advertise the port once it's live.
+  webserver.start(config.web_port, webPayload, () => pushUpdate());
+}
+
+function pushUpdate() {
+  updateTray();
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('servers-update', statePayload());
 }
 
 ipcMain.handle('reload-config', () => {
@@ -379,6 +478,12 @@ ipcMain.handle('poll-now', () => {
 
 ipcMain.handle('join-server', (_, url) => shell.openExternal(url));
 
+// Only ever used for the local web dashboard link in the header.
+ipcMain.handle('open-external', (_, url) => {
+  const ok = url.startsWith('http://') || url.startsWith('https://');
+  if (ok) shell.openExternal(url);
+});
+
 ipcMain.handle('test-notify', (_, key) => {
   const s   = serverStates.get(key);
   const cfg = config.servers.find(c => serverKey(c) === key);
@@ -389,8 +494,20 @@ ipcMain.handle('test-notify', (_, key) => {
 
 // ─── Tray icon ────────────────────────────────────────────────────────────────
 
-function makeTrayIcon() {
+const TRAY_COLORS = {
+  grey:   '#95a5a6',   // nothing known yet (all pending / no servers)
+  red:    '#e74c3c',   // at least one server unreachable
+  yellow: '#f1c40f',   // everything up, but nobody playing
+  green:  '#2ecc71',   // everything up and at least one player online
+};
+
+let trayColor = null;   // currently-drawn colour, to skip redundant redraws
+
+function makeTrayIcon(hex) {
   const size = 16;
+  const r8 = parseInt(hex.slice(1, 3), 16);
+  const g8 = parseInt(hex.slice(3, 5), 16);
+  const b8 = parseInt(hex.slice(5, 7), 16);
   const buf = Buffer.alloc(size * size * 4);
   const cx = (size - 1) / 2, cy = (size - 1) / 2, r = size / 2 - 1;
   for (let y = 0; y < size; y++) {
@@ -398,21 +515,42 @@ function makeTrayIcon() {
       const d = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
       const a = d <= r ? 255 : d <= r + 1 ? Math.round(255 * (r + 1 - d)) : 0;
       const i = (y * size + x) * 4;
-      buf[i] = 0x71; buf[i+1] = 0xcc; buf[i+2] = 0x2e; buf[i+3] = a; // BGRA #2ecc71
+      buf[i] = b8; buf[i+1] = g8; buf[i+2] = r8; buf[i+3] = a;   // BGRA
     }
   }
   return nativeImage.createFromBitmap(buf, { width: size, height: size });
 }
 
-function updateTrayTooltip() {
+// Disabled servers don't count either way.
+function trayStatusColor() {
+  const states = enabledStates();
+  if (!states.length) return 'grey';
+  if (states.some(s => !s.pending && !s.online)) return 'red';
+  if (states.some(s => s.pending)) return 'grey';
+  const players = states.reduce((n, s) => n + (s.players?.length ?? 0), 0);
+  return players > 0 ? 'green' : 'yellow';
+}
+
+function updateTray() {
   if (!tray) return;
-  const states = Array.from(serverStates.values());
+
+  const name = trayStatusColor();
+  if (name !== trayColor) {
+    trayColor = name;
+    tray.setImage(makeTrayIcon(TRAY_COLORS[name]));
+  }
+
+  const states = enabledStates();
   const online = states.filter(s => s.online).length;
-  tray.setToolTip(`Server Watcher — ${online}/${states.length} servers online`);
+  const players = states.reduce((n, s) => n + (s.players?.length ?? 0), 0);
+  tray.setToolTip(
+    `Server Watcher — ${online}/${states.length} servers online, ${players} player${players === 1 ? '' : 's'}`
+  );
 }
 
 function createTray() {
-  tray = new Tray(makeTrayIcon());
+  tray = new Tray(makeTrayIcon(TRAY_COLORS.grey));
+  trayColor = 'grey';
   tray.setToolTip('Server Watcher');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Show Window', click: showWindow },
@@ -476,6 +614,7 @@ app.whenReady().then(() => {
 
   createTray();
   createWindow();
+  startWebserver();
 
   mainWindow.webContents.once('did-finish-load', () => {
     if (configErr) mainWindow.webContents.send('config-error', configErr);
@@ -487,3 +626,4 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', (e) => e.preventDefault());
 app.on('activate', showWindow);
+app.on('before-quit', () => webserver.stop());

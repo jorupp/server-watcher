@@ -6,5 +6,6 @@ contextBridge.exposeInMainWorld('api', {
   reloadConfig:    ()   => ipcRenderer.invoke('reload-config'),
   pollNow:         ()   => ipcRenderer.invoke('poll-now'),
   joinServer:      (url) => ipcRenderer.invoke('join-server', url),
+  openExternal:    (url) => ipcRenderer.invoke('open-external', url),
   testNotify:      (key) => ipcRenderer.invoke('test-notify', key),
 });

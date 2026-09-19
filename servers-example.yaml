@@ -10,6 +10,14 @@ poll_interval: 30
 # Example:
 # notification_sound: "C:\Windows\Media\Windows Notify Email.wav"
 
+# web_port: port for the read-only web dashboard, reachable from your phone at
+# http://<this-machine>:<port>/ . Set to false to turn the dashboard off.
+web_port: 3030
+
+# self_reminder_minutes: how often to re-notify you when a server with a `self`
+# player has people on it and you're not among them. Set to false to disable.
+self_reminder_minutes: 10
+
 # servers: list of game servers to monitor
 #
 # Required fields:
@@ -22,6 +30,13 @@ poll_interval: 30
 #   label              — friendly display name shown in the UI
 #   password           — stored here for your reference; not used for querying
 #   notification_sound — .wav file to play for this server (overrides global setting)
+#   enabled            — false to stop watching this server (default: true). It stays
+#                        in the list as a greyed-out line and isn't polled or counted.
+#   self               — your own in-game name on this server. While you're on the
+#                        server, other players' join notifications are muted; you
+#                        still get alerts when you join or leave. If others are
+#                        playing and you're not, you get a reminder every
+#                        `self_reminder_minutes` listing who's on.
 #
 # If you don't know the gamedig `type` for your game, you can use:
 #   type: steam
@@ -54,6 +69,12 @@ servers:
 #    port: 27015
 #    type: garrysmod
 #    password: "yourpassword"
+#    self: "YourInGameName"
+#
+#  - label: "Off-season server"
+#    host: "your.server.ip.or.hostname"
+#    type: rust
+#    enabled: false
 #
 #  - label: "Rust Server"
 #    host: "your.server.ip.or.hostname"
