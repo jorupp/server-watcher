@@ -14,6 +14,15 @@ poll_interval: 30
 # http://<this-machine>:<port>/ . Set to false to turn the dashboard off.
 web_port: 3030
 
+# metrics_port: port for the Prometheus scrape endpoint at
+# http://<this-machine>:<port>/metrics . Set to false to turn it off.
+metrics_port: 3031
+
+# metrics_player_window_hours: how long a player keeps reporting a 0 in the
+# metrics after logging off. Without this their series would vanish, and the
+# per-player Grafana timeline would draw a gap instead of a "not playing" line.
+metrics_player_window_hours: 24
+
 # self_reminder_minutes: how often to re-notify you when a server with a `self`
 # player has people on it and you're not among them. Set to false to disable.
 self_reminder_minutes: 10

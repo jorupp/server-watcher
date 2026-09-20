@@ -8,6 +8,7 @@ const { exec } = require('child_process');
 const yaml = require('js-yaml');
 const GameDig = require('gamedig');
 const webserver = require('./webserver');
+const metrics = require('./metrics');
 
 if (process.platform === 'win32') {
   // A custom AUMID only works once the app has a matching Start Menu shortcut
@@ -33,6 +34,12 @@ const HISTORY_PATH = path.join(__dirname, 'history.yaml');
 const DEFAULT_POLL_INTERVAL = 30;
 const RETRY_DELAY_MS = 5_000;
 const DEFAULT_WEB_PORT = 3030;
+// Prometheus scrape endpoint. Separate from the dashboard port so the two can be
+// turned on, off and firewalled independently.
+const DEFAULT_METRICS_PORT = 3031;
+// How long a player keeps reporting a 0 in the metrics after logging off, so the
+// per-player timeline draws a "not playing" line instead of a gap.
+const DEFAULT_METRICS_PLAYER_WINDOW_HOURS = 24;
 // How often to re-nudge you when a `self` server has players and you're not on it.
 const DEFAULT_SELF_REMINDER_MINUTES = 10;
 
@@ -50,6 +57,8 @@ let config = {
   servers: [],
   notification_sound: null,
   web_port: DEFAULT_WEB_PORT,
+  metrics_port: DEFAULT_METRICS_PORT,
+  metrics_player_window_hours: DEFAULT_METRICS_PLAYER_WINDOW_HOURS,
   self_reminder_minutes: DEFAULT_SELF_REMINDER_MINUTES,
 };
 const serverStates  = new Map(); // key -> state object
@@ -90,6 +99,12 @@ function loadConfig() {
       // web_port: false / 0 turns the dashboard off entirely.
       web_port: parsed?.web_port === false ? null
               : Number(parsed?.web_port) || DEFAULT_WEB_PORT,
+      // metrics_port: false / 0 turns the Prometheus endpoint off entirely.
+      metrics_port: parsed?.metrics_port === false ? null
+              : Number(parsed?.metrics_port) || DEFAULT_METRICS_PORT,
+      metrics_player_window_hours:
+              Math.max(1, Number(parsed?.metrics_player_window_hours)
+                          || DEFAULT_METRICS_PLAYER_WINDOW_HOURS),
       self_reminder_minutes: parsed?.self_reminder_minutes === false ? null
               : Math.max(1, Number(parsed?.self_reminder_minutes) || DEFAULT_SELF_REMINDER_MINUTES),
       servers: Array.isArray(parsed?.servers) ? parsed.servers : [],
@@ -143,11 +158,23 @@ async function querySingle(cfg) {
 
   try {
     const s = await GameDig.query(options);
+
+    // Valve's player records carry how many seconds each player has been
+    // connected. That's the server's own count, so it survives watcher restarts
+    // and beats anything we can infer from polling. Not every game fills it in.
+    const playerTimes = {};
+    for (const p of s.players) {
+      const secs = Number(p.raw?.time);
+      if (p.name?.trim() && Number.isFinite(secs) && secs > 0) playerTimes[p.name] = secs;
+    }
+
     return {
       online:     true,
       name:       s.name || cfg.label,
       map:        s.map  || '',
+      version:    s.raw?.version || '',
       players:    s.players.map(p => p.name).filter(n => n?.trim()),
+      playerTimes,
       maxPlayers: s.maxplayers || 0,
       ping:       Math.round(s.ping || 0),
     };
@@ -167,8 +194,15 @@ async function querySingle(cfg) {
 // Merge a query result into the stored state for a server.
 function applyResult(key, cfg, result, extra = {}) {
   const prev = serverStates.get(key) ?? {};
+  // Start of the current unbroken run of successful queries. A failed query
+  // clears it, so this is uptime as the watcher saw it — it also resets when the
+  // app restarts, since we have no idea what happened while it was closed.
+  const onlineSince = result.online
+    ? (prev.online ? (prev.onlineSince ?? Date.now()) : Date.now())
+    : null;
   serverStates.set(key, {
     ...prev,
+    onlineSince,
     key,
     label:    cfg.label || key,
     host:     cfg.host,
@@ -301,16 +335,23 @@ function checkJoins(key, cfg, result) {
     const existing  = serverHistory.get(name);
     const isNewJoin = previous !== undefined && !previous.has(name);
 
+    // Valve servers report how long each player has been connected, which knows
+    // about time the watcher was closed for. Only used to *establish* a session
+    // start, never to keep re-deriving one — the reported value drifts by a
+    // second between polls and that would jitter every chart built on it.
+    const reported = Number(result.playerTimes?.[name]);
+    const reportedStart = Number.isFinite(reported) ? now - reported * 1000 : null;
+
     let sessionStart;
     if (existing && !isNewJoin) {
       // Continuing an ongoing session — preserve the start time.
       // On first poll after app restart, also preserve it if the player was
       // seen recently enough that they're likely in the same session.
       const recentEnough = (now - existing.lastSeen) < config.poll_interval * 3 * 1000;
-      sessionStart = (isFirst && !recentEnough) ? now : existing.sessionStart;
+      sessionStart = (isFirst && !recentEnough) ? (reportedStart ?? now) : existing.sessionStart;
     } else {
       // New join (or first time we've ever seen this player).
-      sessionStart = now;
+      sessionStart = reportedStart ?? now;
     }
 
     serverHistory.set(name, { lastSeen: now, sessionStart });
@@ -395,6 +436,7 @@ function resetAndRestart() {
   selfReminders.clear();
   initPendingStates();
   startWebserver();
+  startMetricsServer();
   pushUpdate();
   startPolling();
 }
@@ -441,6 +483,9 @@ function statePayload() {
     history:      historyForIPC(),
     webPort:      webserver.getPort(),
     webError:     webserver.getError(),
+    metricsPort:  metrics.getPort(),
+    metricsError: metrics.getError(),
+    metricsPlayerWindowHours: config.metrics_player_window_hours,
   };
 }
 
@@ -456,6 +501,12 @@ function webPayload() {
 function startWebserver() {
   // pushUpdate on ready so the header can advertise the port once it's live.
   webserver.start(config.web_port, webPayload, () => pushUpdate());
+}
+
+function startMetricsServer() {
+  // Same payload the dashboard gets — passwords stripped. Prometheus is no more
+  // trusted than a phone on the LAN.
+  metrics.start(config.metrics_port, webPayload, () => pushUpdate());
 }
 
 function pushUpdate() {
@@ -615,6 +666,7 @@ app.whenReady().then(() => {
   createTray();
   createWindow();
   startWebserver();
+  startMetricsServer();
 
   mainWindow.webContents.once('did-finish-load', () => {
     if (configErr) mainWindow.webContents.send('config-error', configErr);
@@ -626,4 +678,4 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', (e) => e.preventDefault());
 app.on('activate', showWindow);
-app.on('before-quit', () => webserver.stop());
+app.on('before-quit', () => { webserver.stop(); metrics.stop(); });

@@ -6,11 +6,16 @@ let lastData = null;
 
 function render(data) {
   lastData = data;
-  const { servers, pollInterval, history = {}, webPort = null, webError = null } = data;
+  const {
+    servers, pollInterval, history = {},
+    webPort = null, webError = null,
+    metricsPort = null, metricsError = null,
+  } = data;
   const list    = document.getElementById('servers-list');
   const summary = document.getElementById('summary');
   const pollEl  = document.getElementById('poll-label');
   const webEl   = document.getElementById('web-link');
+  const metricsEl = document.getElementById('metrics-link');
 
   pollEl.textContent = `polling every ${pollInterval}s`;
 
@@ -21,6 +26,15 @@ function render(data) {
   } else {
     webEl.textContent = webError ? `web dashboard off — ${webError}` : '';
     delete webEl.dataset.url;
+  }
+
+  metricsEl.classList.toggle('web-error', Boolean(metricsError));
+  if (metricsPort) {
+    metricsEl.textContent = `metrics: :${metricsPort}`;
+    metricsEl.dataset.url = `http://localhost:${metricsPort}/metrics`;
+  } else {
+    metricsEl.textContent = metricsError ? `metrics off — ${metricsError}` : '';
+    delete metricsEl.dataset.url;
   }
 
   if (!servers.length) {
@@ -92,11 +106,13 @@ document.getElementById('servers-list').addEventListener('click', (e) => {
 
 });
 
-document.getElementById('web-link').addEventListener('click', (e) => {
-  e.preventDefault();
-  const url = e.currentTarget.dataset.url;
-  if (url) window.api.openExternal(url);
-});
+for (const id of ['web-link', 'metrics-link']) {
+  document.getElementById(id).addEventListener('click', (e) => {
+    e.preventDefault();
+    const url = e.currentTarget.dataset.url;
+    if (url) window.api.openExternal(url);
+  });
+}
 
 // ── IPC wiring ────────────────────────────────────────────────────────────────
 window.api.onServersUpdate(render);

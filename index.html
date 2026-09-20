@@ -151,15 +151,15 @@
     @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.4} }
     .blink { animation: blink 1.6s ease-in-out infinite; }
 
-    #web-link {
+    #web-link, #metrics-link {
       font-size: 12px;
       color: #94a3b8;
       text-decoration: none;
       border-bottom: 1px dotted #cbd5e1;
     }
-    #web-link:hover { color: #2563eb; border-bottom-color: #93c5fd; }
-    #web-link:empty { display: none; }
-    #web-link.web-error {
+    #web-link:hover, #metrics-link:hover { color: #2563eb; border-bottom-color: #93c5fd; }
+    #web-link:empty, #metrics-link:empty { display: none; }
+    #web-link.web-error, #metrics-link.web-error {
       color: #dc2626;
       border-bottom: none;
       cursor: default;
@@ -173,6 +173,7 @@
       <span id="summary"></span>
       <span id="poll-label"></span>
       <a id="web-link" href="#" title="Open the web dashboard in your browser"></a>
+      <a id="metrics-link" href="#" title="Prometheus scrape endpoint"></a>
     </div>
     <div class="header-actions">
       <button class="btn btn-primary" id="refresh-btn">Refresh</button>
