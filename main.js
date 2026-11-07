@@ -7,6 +7,7 @@ const fs = require('fs');
 const { exec } = require('child_process');
 const yaml = require('js-yaml');
 const GameDig = require('gamedig');
+const factorio = require('./factorio');
 const webserver = require('./webserver');
 const metrics = require('./metrics');
 
@@ -33,6 +34,8 @@ const CONFIG_PATH  = path.join(__dirname, 'servers.yaml');
 const HISTORY_PATH = path.join(__dirname, 'history.yaml');
 const DEFAULT_POLL_INTERVAL = 30;
 const RETRY_DELAY_MS = 5_000;
+// Extra attempts (RETRY_DELAY_MS apart) before a server that was up is declared down.
+const DOWN_CONFIRM_RETRIES = 2;
 const DEFAULT_WEB_PORT = 3030;
 // Prometheus scrape endpoint. Separate from the dashboard port so the two can be
 // turned on, off and firewalled independently.
@@ -74,8 +77,13 @@ const selfReminders = new Map();
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+function serverPort(cfg) {
+  return Number(cfg.port) || (cfg.type === 'factorio' ? factorio.DEFAULT_PORT : 27015);
+}
+
 function serverKey(cfg) {
-  return `${cfg.host}:${cfg.port || 27015}`;
+  const port = cfg.type === 'factorio' ? serverPort(cfg) : cfg.port || 27015;
+  return `${cfg.host}:${port}`;
 }
 
 // A server is polled and counted unless it was explicitly disabled.
@@ -123,7 +131,8 @@ function initPendingStates() {
       key,
       label:    cfg.label || key,
       host:     cfg.host,
-      port:     Number(cfg.port) || 27015,
+      port:     serverPort(cfg),
+      type:     cfg.type,
       password: cfg.password || '',
       joinPort: cfg.joinPort ? Number(cfg.joinPort) : null,
       appid:    cfg.appid    ? Number(cfg.appid)    : null,
@@ -134,6 +143,8 @@ function initPendingStates() {
       online:   false,
       retrying: false,
       retryAt:  null,
+      // { attempt, of, retryAt } while rechecking a server that just missed a poll.
+      confirming: null,
       lastUpdated: null,
     });
   }
@@ -149,7 +160,7 @@ async function querySingle(cfg) {
   const options = {
     type,
     host: cfg.host,
-    port: Number(cfg.port) || 27015,
+    port: serverPort(cfg),
     maxAttempts: 1,
     socketTimeout: 5000,
     givenPortOnly: true,
@@ -157,7 +168,15 @@ async function querySingle(cfg) {
   if (cfg.appid) options.appid = Number(cfg.appid);
 
   try {
-    const s = await GameDig.query(options);
+    const s = type === 'factorio'
+      ? await factorio.query({
+        host: options.host,
+        port: options.port,
+        timeout: options.socketTimeout,
+        rconPort: cfg.rcon_port,
+        rconPassword: cfg.rcon_password,
+      })
+      : await GameDig.query(options);
 
     // Valve's player records carry how many seconds each player has been
     // connected. That's the server's own count, so it survives watcher restarts
@@ -176,14 +195,14 @@ async function querySingle(cfg) {
       players:    s.players.map(p => p.name).filter(n => n?.trim()),
       playerTimes,
       maxPlayers: s.maxplayers || 0,
-      ping:       Math.round(s.ping || 0),
+      ping:       type === 'factorio' ? null : Math.round(s.ping || 0),
     };
   } catch (err) {
     return {
       online: false,
       error:  err.message || 'Query failed',
       errorDetail: [
-        `Host:  ${cfg.host}:${Number(cfg.port) || 27015}`,
+        `Host:  ${cfg.host}:${options.port}`,
         `Type:  ${type}`,
         `Error: ${err.message || 'Query failed'}`,
       ].join('\n'),
@@ -206,7 +225,7 @@ function applyResult(key, cfg, result, extra = {}) {
     key,
     label:    cfg.label || key,
     host:     cfg.host,
-    port:     Number(cfg.port) || 27015,
+    port:     serverPort(cfg),
     password: cfg.password || '',
     joinPort: cfg.joinPort ? Number(cfg.joinPort) : null,
     self:     cfg.self || null,
@@ -214,6 +233,7 @@ function applyResult(key, cfg, result, extra = {}) {
     pending:  false,
     retrying: false,
     retryAt:  null,
+    confirming: null,
     ...result,
     ...extra,
     lastUpdated: Date.now(),
@@ -380,9 +400,33 @@ function checkJoins(key, cfg, result) {
 
 async function runServerPoll(cfg) {
   const key = serverKey(cfg);
+  const wasOnline = serverStates.get(key)?.online === true;
 
   // ── Attempt 1 ──
   const r1 = await querySingle(cfg);
+
+  // A single dropped UDP query is common and doesn't mean the server went down.
+  // If it was up, recheck a few times before believing it — and until then leave
+  // the state (online, players, lastUpdated) exactly as it was, so the UI, the
+  // join/leave tracking and Prometheus all keep reporting the last good poll.
+  if (!r1.online && wasOnline) {
+    let last = r1;
+    for (let attempt = 1; attempt <= DOWN_CONFIRM_RETRIES; attempt++) {
+      patchState(key, {
+        confirming: { attempt, of: DOWN_CONFIRM_RETRIES, retryAt: Date.now() + RETRY_DELAY_MS },
+      });
+      pushUpdate();
+      await sleep(RETRY_DELAY_MS);
+
+      last = await querySingle(cfg);
+      if (last.online) break;
+    }
+    applyResult(key, cfg, last);
+    pushUpdate();
+    if (last.online) checkJoins(key, cfg, last);
+    return;
+  }
+
   applyResult(key, cfg, r1);
   pushUpdate();
 

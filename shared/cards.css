@@ -207,6 +207,7 @@
 .status-note.muted     { color: #94a3b8; }
 .status-note.countdown { color: #d97706; }
 .status-note.retrying  { color: #64748b; }
+.status-note.confirming { color: #d97706; margin-top: 6px; }
 
 /* Expandable error block */
 .error-details { padding-left: 18px; }

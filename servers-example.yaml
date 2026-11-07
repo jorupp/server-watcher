@@ -31,10 +31,11 @@ self_reminder_minutes: 10
 #
 # Required fields:
 #   host  — IP address or hostname
-#   type  — gamedig game identifier (see list below)
+#   type  — game identifier (see list below)
 #
 # Optional fields:
-#   port               — query/status port (default: 27015 for most Steam games)
+#   port               — query/status port (default: 27015 for most Steam games);
+#                        for Factorio, the UDP game port (default: 34197)
 #   joinPort           — game port to connect on, if different from the query port
 #   label              — friendly display name shown in the UI
 #   password           — stored here for your reference; not used for querying
@@ -65,6 +66,7 @@ self_reminder_minutes: 10
 #   Squad           → squad
 #   ARMA 3          → arma3
 #   Minecraft       → minecraft
+#   Factorio        → factorio
 #
 #   Full list: https://github.com/gamedig/node-gamedig#games-list
 # ---------------------------------------------------------------------------
@@ -104,3 +106,12 @@ servers:
 #    joinPort: 7778    # actual game port Steam connects to
 #    type: arkse
 #    password: ""
+#
+#  - label: "Factorio Server"
+#    host: "factorio.example.com"
+#    port: 34197
+#    type: factorio
+#    # Public matchmaking can query password-protected games without a join password.
+#    # For an unlisted server, enable Factorio RCON and set both options below.
+#    # rcon_port: 27015          # TCP, from --rcon-port
+#    # rcon_password: "change-me"  # from --rcon-password

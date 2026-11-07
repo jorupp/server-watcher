@@ -1,10 +1,38 @@
 # Server Watcher
 
-Local Electron app used to monitor a series of Steam-based game servers and notify when someone joins.
+Local Electron app that monitors game servers and sends notifications when someone joins.
 
 Configure it by copying `servers-example.yaml` to `servers.yaml` — that file documents
 every option, including per-server `self` (mute other players' join alerts while
 you're online) and `enabled: false` (keep a server listed but stop watching it).
+
+## Factorio
+
+Set `type: factorio` and use the game's UDP port (34197 by default). For publicly
+listed servers, the watcher gets the player list from Factorio matchmaking by
+the server's public address. This also works for games with a join password.
+
+For unlisted or LAN-only servers, enable Factorio's TCP RCON with `--rcon-port`
+or `--rcon-bind`, plus `--rcon-password`. Set `rcon_port` and `rcon_password` in
+the watcher's server entry. Keep RCON on a trusted network. The watcher uses
+`/players online` to get the player list.
+
+### Find the address of a game from the public browser
+
+Factorio's **Browse public games** details pane shows the game's name, access
+and other details. To get the IP and port, join the game and search for the most
+recent `Joining game` line in `factorio-current.log`. On Windows, the log is
+usually at `%APPDATA%\Factorio\factorio-current.log`. [Factorio log locations](https://wiki.factorio.com/Application_directory)
+
+For example, if the log says `Joining game IP ADDR:({203.0.113.10:34200})`, set
+`host: "203.0.113.10"` and `port: 34200` in `servers.yaml`. Use the browser name
+as `label` if you like. You can use the same address in Factorio's **Connect to
+address** menu.
+
+If you only select the game, look for a recent `get-game-details/<game_id>` URL
+in the log. Open that URL, check that the `name` matches the game you selected,
+and use the `host_address` from the JSON response. Save the address in the
+watcher, since a game ID can change when the host restarts. [Factorio matchmaking API](https://wiki.factorio.com/Matchmaking_API)
 
 ## Tray icon
 

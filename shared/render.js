@@ -140,14 +140,20 @@
     if (s.pending) {
       badge = `<span class="player-badge">&mdash;</span>`;
     } else if (s.online) {
-      badge = `<span class="player-badge">${players.length} / ${s.maxPlayers}</span>`;
+      const playerCount = s.type === 'factorio' && !s.maxPlayers
+        ? players.length : `${players.length} / ${s.maxPlayers}`;
+      badge = `<span class="player-badge">${playerCount}</span>`;
     } else {
       badge = `<span class="player-badge">OFFLINE</span>`;
     }
 
     // ── Join button ──
     let joinBtn = '';
-    if (showJoin) {
+    if (showJoin && s.type === 'factorio') {
+      const host = s.host.includes(':') && !s.host.startsWith('[') ? `[${s.host}]` : s.host;
+      const address = `${host}:${s.joinPort || s.port}`;
+      joinBtn = `<span class="server-browser-note" title="Use Factorio's Connect to address">${esc(address)}</span>`;
+    } else if (showJoin) {
       joinBtn = portsMatch(s)
         ? `<button class="join-btn" data-url="${esc(steamUrl(s))}">Join Game</button>`
         : `<span class="server-browser-note">Use Steam server browser</span>`;
@@ -173,11 +179,17 @@
         : players.map(p =>
             `<span class="chip${s.self && p === s.self ? ' chip-self' : ''}">${esc(p)}</span>`
           ).join('');
+      // Missed a poll and is being rechecked — still shown as up until confirmed.
+      const c = s.confirming;
+      const confirmLine = c
+        ? `<p class="status-note confirming">No response &mdash; recheck ${c.attempt}/${c.of}: <span class="countdown" data-retry-at="${c.retryAt}">${esc(countdownText(c.retryAt))}</span></p>`
+        : '';
       body = `
         <div class="players-section">
           <div class="players-heading">Players</div>
           <div class="player-chips">${chips}</div>
-        </div>`;
+        </div>
+        ${confirmLine}`;
     } else {
       // Error + optional retry state
       let retryLine = '';
