@@ -5,6 +5,8 @@ Local Electron app that monitors game servers and sends notifications when someo
 Configure it by copying `servers-example.yaml` to `servers.yaml` — that file documents
 every option, including per-server `self` (mute other players' join alerts while
 you're online) and `enabled: false` (keep a server listed but stop watching it).
+Add `hidden: true` alongside `enabled: false` to hide that server entirely from
+the desktop and web dashboards. `hidden` is ignored for enabled servers.
 
 ## Factorio
 

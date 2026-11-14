@@ -42,6 +42,8 @@ self_reminder_minutes: 10
 #   notification_sound — .wav file to play for this server (overrides global setting)
 #   enabled            — false to stop watching this server (default: true). It stays
 #                        in the list as a greyed-out line and isn't polled or counted.
+#   hidden             — true to hide this server entirely when enabled is false
+#                        (default: false). Ignored while the server is enabled.
 #   self               — your own in-game name on this server. While you're on the
 #                        server, other players' join notifications are muted; you
 #                        still get alerts when you join or leave. If others are
@@ -86,6 +88,7 @@ servers:
 #    host: "your.server.ip.or.hostname"
 #    type: rust
 #    enabled: false
+#    hidden: true
 #
 #  - label: "Rust Server"
 #    host: "your.server.ip.or.hostname"

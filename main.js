@@ -138,6 +138,7 @@ function initPendingStates() {
       appid:    cfg.appid    ? Number(cfg.appid)    : null,
       self:     cfg.self || null,
       enabled:  isEnabled(cfg),
+      hidden:   cfg.hidden === true,
       // Disabled servers are never queried, so they're not "pending" either.
       pending:  isEnabled(cfg),
       online:   false,
@@ -230,6 +231,7 @@ function applyResult(key, cfg, result, extra = {}) {
     joinPort: cfg.joinPort ? Number(cfg.joinPort) : null,
     self:     cfg.self || null,
     enabled:  isEnabled(cfg),
+    hidden:   cfg.hidden === true,
     pending:  false,
     retrying: false,
     retryAt:  null,

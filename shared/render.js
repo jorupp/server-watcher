@@ -120,7 +120,7 @@
   // opts.join — render the Steam "Join Game" button (desktop app only; a
   // steam:// link is useless from a phone browser).
   function renderCard(s, history, opts = {}) {
-    if (!isEnabled(s)) return renderDisabledCard(s);
+    if (!isEnabled(s)) return s.hidden === true ? '' : renderDisabledCard(s);
 
     const showJoin = opts.join !== false;
     const cls      = s.pending ? 'pending' : s.online ? 'online' : 'offline';
