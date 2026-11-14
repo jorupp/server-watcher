@@ -8,6 +8,50 @@ you're online) and `enabled: false` (keep a server listed but stop watching it).
 Add `hidden: true` alongside `enabled: false` to hide that server entirely from
 the desktop and web dashboards. `hidden` is ignored for enabled servers.
 
+## Discover a server
+
+Run discovery with Node.js (18 or newer) after installing dependencies with
+`npm install`. Electron does not need to be running.
+
+```sh
+# Unknown game on a known range of query ports
+npm run discover -- games.example.com --ports 27015-27030
+
+# Mix individual ports and ranges, and narrow down the query types
+node discover.js games.example.com --ports 27015,28015-28020 --types steam,minecraft
+
+# Known game, unknown port
+node discover.js games.example.com --ports 34190-34210 --type factorio
+
+# Try each supported type at its default query port
+node discover.js games.example.com
+
+node discover.js --list-types
+node discover.js games.example.com --ports 27015-27030 --type steam --json
+```
+
+`--port`/`--ports` and `--type`/`--types` accept comma-separated values and can
+be repeated. Omitting types tries all games supported by the installed GameDig
+catalog plus Factorio. Shared query settings are tried once per port. Omitting
+ports uses GameDig's default query ports (27015 when none is defined), plus
+Factorio's default game port. Explicit ports are queried exactly, without
+automatically adding game-to-query port offsets.
+
+Matches appear immediately on stderr. On completion, stdout contains copyable
+`servers.yaml` entries, or a JSON array with `--json` (including compatible type
+IDs and a Steam app ID when reported). Games sharing a protocol can respond to
+the same query; a compatible type is not a definitive game identification.
+Several distinct query variants may match the same server. Review the entries
+before adding them to your configuration. Query ports can differ from join ports.
+
+Use `--timeout 5000` for slower servers, `--concurrency 4` to query fewer ports
+at once (default 8), and `--verbose` to see failed attempts. Broad scans can take
+time because every query variant gets its own timeout. Ctrl+C stops discovery.
+No response does not prove that a port is closed. Factorio discovery checks
+public matchmaking, so it cannot find unlisted or LAN-only games or confirm
+direct game connectivity. Exit codes are 0 for matches, 1 for no matches, and
+2 for invalid arguments or setup errors.
+
 ## Factorio
 
 Set `type: factorio` and use the game's UDP port (34197 by default). For publicly

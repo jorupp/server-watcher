@@ -4,6 +4,7 @@
   "description": "Steam game server monitor with desktop notifications",
   "main": "main.js",
   "scripts": {
+    "discover": "node discover.js",
     "start": "electron .",
     "dev": "cross-env NODE_ENV=development electron ."
   },
